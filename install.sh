@@ -12,7 +12,7 @@ done
 mkdir -p -- "$target/public" "$unit_dir"
 if [[ "$source_dir" != "$target" ]]; then
   install -m 644 package.json package-lock.json server.mjs discover.py terminal.py tmux.conf "$target/"
-  install -m 644 public/index.html public/style.css public/app.js "$target/public/"
+  install -m 644 public/index.html public/style.css public/app.js public/favicon.svg "$target/public/"
 fi
 cd -- "$target"
 npm ci --omit=dev

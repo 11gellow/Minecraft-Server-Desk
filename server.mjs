@@ -242,6 +242,7 @@ function isAllowed(req, requireOrigin = false) {
 
 const assets = new Map([
   ['/', ['public/index.html', 'text/html; charset=utf-8']],
+  ['/favicon.svg', ['public/favicon.svg', 'image/svg+xml']],
   ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['public/style.css', 'text/css; charset=utf-8']],
   ['/vendor/xterm.js', ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8']],
