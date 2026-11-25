@@ -49,54 +49,85 @@ function describe(current) {
   return [kinds[current.kind] || current.kind, current.version, current.loaderVersion].filter(Boolean).join(' · ');
 }
 
+function versions(current) {
+  return [current.version && 'Minecraft ' + current.version, current.loaderVersion && '加载器 ' + current.loaderVersion]
+    .filter(Boolean).join(' · ') || '版本未知';
+}
+
 function currentStatus(item) {
   return activeActions.get(item.id) || item.status;
+}
+
+function emptyState() {
+  const box = node('div', '', 'empty');
+  const add = node('button', '＋ 添加实例', 'primary');
+  add.onclick = () => openImport();
+  box.append(node('span', '', 'empty-block'), node('h3', '这里还空空如也'),
+    node('p', '选择一个包含服务端 JAR 或加载器启动参数的目录，面板会自动识别启动入口。'), add);
+  return box;
+}
+
+function instanceCard(item) {
+  const status = currentStatus(item);
+  const card = node('article', '', 'instance-card' + (item.id === selectedId ? ' selected' : ''));
+  card.onclick = event => {
+    if (event.target.closest('.actions')) return;
+    selectedId = item.id;
+    el('console-output').textContent = '';
+    render();
+    void refreshConsole();
+  };
+  const art = node('div', '', 'card-art kind-' + item.kind);
+  art.append(node('span', kinds[item.kind] || item.kind, 'tag'));
+  const body = node('div', '', 'card-body');
+  const header = node('div', '', 'card-head');
+  const select = node('button', item.name, 'title');
+  select.setAttribute('aria-pressed', String(item.id === selectedId));
+  header.append(select, node('span', statuses[status], 'status ' + status));
+  const path = node('p', item.dir, 'card-path');
+  path.title = item.dir;
+  const buttons = node('div', '', 'actions');
+  for (const [action, label, style] of [['start', '启动', 'primary'], ['stop', '停止', 'danger'], ['restart', '重启', '']]) {
+    const button = node('button', label, style);
+    const idle = !['starting', 'stopping', 'restarting'].includes(status) && activeActions.size === 0;
+    button.disabled = !idle || (action === 'start' ? status === 'running' : status !== 'running');
+    button.onclick = () => void perform(item, action);
+    buttons.append(button);
+  }
+  body.append(header, node('p', versions(item), 'card-meta'), path, buttons);
+  card.append(art, body);
+  return card;
 }
 
 function render() {
   const items = appState.instances;
   if (!items.some(item => item.id === selectedId)) selectedId = items[0]?.id;
   const selected = items.find(item => item.id === selectedId);
-  el('instance-count').textContent = items.length ? items.length + ' 个实例' : '还没有服务端，添加一个服务器目录开始。';
+  el('instance-count').textContent = items.length ? '共 ' + items.length + ' 个实例，选择一个查看控制台。' : '还没有服务端，添加一个服务器目录开始。';
+  el('stat-total').textContent = String(items.length);
+  el('stat-running').textContent = String(items.filter(item => currentStatus(item) === 'running').length);
   const signature = JSON.stringify([items, selectedId, [...activeActions]]);
   if (signature !== previousCards) {
     previousCards = signature;
-    el('instances').replaceChildren(...items.map(item => {
-      const status = currentStatus(item);
-      const card = node('article', '', 'instance-card' + (item.id === selectedId ? ' selected' : ''));
-      const header = node('div', '', 'top');
-      const select = node('button', item.name, 'title');
-      select.setAttribute('aria-pressed', String(item.id === selectedId));
-      select.onclick = () => {
-        selectedId = item.id;
-        el('console-output').textContent = '';
-        render();
-        void refreshConsole();
-      };
-      header.append(select, node('span', statuses[status], 'status ' + status));
-      const buttons = node('div', '', 'actions');
-      for (const [action, label] of [['start', '启动'], ['stop', '停止'], ['restart', '重启']]) {
-        const button = node('button', label, action === 'start' ? 'primary' : '');
-        const idle = !['starting', 'stopping', 'restarting'].includes(status) && activeActions.size === 0;
-        button.disabled = !idle || (action === 'start' ? status === 'running' : status !== 'running');
-        button.onclick = () => void perform(item, action);
-        buttons.append(button);
-      }
-      card.append(header, node('p', describe(item)), buttons);
-      return card;
-    }));
+    el('instances').replaceChildren(...(items.length ? items.map(instanceCard) : [emptyState()]));
   }
   el('instance-detail').hidden = !selected;
   if (selected) {
     const status = currentStatus(selected);
+    el('detail-kind').textContent = describe(selected);
     el('detail-name').textContent = selected.name;
     el('detail-path').textContent = selected.dir;
+    el('fact-entry').textContent = selected.entry;
+    el('fact-java').textContent = selected.java;
+    el('fact-prestart').textContent = selected.prestart || '未配置';
+    el('fact-exit').textContent = selected.exit === null ? '—' : String(selected.exit);
     el('console-status').textContent = statuses[status];
     el('console-status').className = 'status ' + status;
     el('send-command').disabled = status !== 'running';
     el('edit').disabled = !['stopped', 'failed'].includes(status);
   }
   el('bind-address').textContent = appState.bind || '';
+  el('header-bind').textContent = appState.bind ? appState.bind + ':' + appState.port : '—';
   if (document.activeElement !== el('port') && !el('port').dataset.dirty) el('port').value = appState.port || '';
 }
 
@@ -164,7 +195,7 @@ async function browse(dir) {
     el('current-directory').textContent = browseState.dir;
     el('up-directory').disabled = browseState.parent === browseState.dir;
     el('directories').replaceChildren(...browseState.directories.map(item => {
-      const button = node('button', '›  ' + item.name);
+      const button = node('button', item.name);
       button.onclick = () => void browse(item.dir);
       return button;
     }));
@@ -295,8 +326,11 @@ el('settings-form').onsubmit = async event => {
 function connectTerminal() {
   if (ws && ws.readyState < 2) return ws.close();
   if (!terminal) {
-    terminal = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000,
-      theme: { background: '#0e1511', foreground: '#d6ebde', cursor: '#a7ebbd' } });
+    terminal = new Terminal({ cursorBlink: true, cursorStyle: 'block', fontSize: 14, scrollback: 5000,
+      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
+      theme: { background: '#000000', foreground: '#e6e6e6', cursor: '#55ff55', cursorAccent: '#000000',
+        selectionBackground: '#3c852780', green: '#52a535', brightGreen: '#55ff55', yellow: '#ffaa00',
+        brightYellow: '#ffff55', red: '#c33b35', brightRed: '#ff5555', blue: '#3a87f4', brightBlue: '#5b9ffb' } });
     fit = new FitAddon.FitAddon();
     terminal.loadAddon(fit);
     terminal.open(el('terminal'));
@@ -314,14 +348,17 @@ function connectTerminal() {
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
   el('terminal-status').textContent = '正在连接…';
+  el('terminal-status').dataset.state = 'connecting';
   el('connect-terminal').textContent = '断开连接';
   ws.onopen = () => {
     el('terminal-status').textContent = '已连接';
+    el('terminal-status').dataset.state = 'open';
     ws.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
   };
   ws.onmessage = event => terminal.write(new Uint8Array(event.data));
   ws.onclose = () => {
     el('terminal-status').textContent = '连接已关闭';
+    el('terminal-status').dataset.state = 'closed';
     el('connect-terminal').textContent = '连接终端';
   };
   ws.onerror = () => notice('终端连接失败。请确认当前访问方式支持 WebSocket。', true);
