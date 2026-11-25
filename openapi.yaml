@@ -1,0 +1,671 @@
+openapi: 3.0.3
+info:
+  title: Minecraft 服务端面板 API
+  version: '1.0.0'
+  description: |
+    HTTP API 使用 JSON。所有 POST 操作均要求请求头 X-MC-Panel: 1。
+    HTTP 请求的 Host 必须在面板的允许列表内。Origin 可以省略；一旦提供，
+    它必须是 http 或 https，且其主机和端口须按该协议的默认端口规则与 Host 匹配。
+    实例输出通过 HTTP 轮询读取。Linux 终端使用 WebSocket，握手和消息见 websocket-terminal.md。
+    未匹配的 HTTP 路由在通过来源校验后返回 404 和 {"error":"找不到该页面或操作。"}。
+servers:
+  - url: http://127.0.0.1:51865
+    description: 默认面板地址
+tags:
+  - name: 面板
+  - name: 目录
+  - name: 实例
+paths:
+  /api/state:
+    get:
+      tags: [面板]
+      summary: 获取面板状态和实例列表
+      operationId: getPanelState
+      responses:
+        '200':
+          description: 面板配置及所有实例当前状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PanelState'
+        '403':
+          $ref: '#/components/responses/ReadForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/directories:
+    get:
+      tags: [目录]
+      summary: 浏览服务器目录
+      operationId: listDirectories
+      parameters:
+        - name: dir
+          in: query
+          required: true
+          description: 面板所在服务器上的绝对路径。客户端应对查询参数值做 URL 编码。
+          schema:
+            type: string
+          example: /home/minecraft/mc-servers
+      responses:
+        '200':
+          description: 当前目录的真实路径、父路径及可选条目。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryListing'
+        '400':
+          description: 缺少绝对路径，或目标不存在、不可访问或无法作为目录浏览。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/ReadForbidden'
+  /api/discover:
+    post:
+      tags: [目录]
+      summary: 扫描可用的服务端启动入口
+      operationId: discoverInstances
+      description: 输入目录本身没有候选时，扫描至多两层子目录。若没有发现候选，仍返回输入目录的资料，其 candidates 为空数组。
+      parameters:
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dir]
+              properties:
+                dir:
+                  type: string
+                  description: 面板所在服务器上的绝对目录路径。
+                  example: /home/minecraft/mc-servers
+      responses:
+        '200':
+          description: 包含输入目录或发现的候选实例目录的数组。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscoveryProfile'
+              example:
+                - dir: /home/minecraft/mc-servers/example
+                  name: example
+                  java: java
+                  port: '25565'
+                  address: ''
+                  eula: true
+                  candidates:
+                    - kind: forge
+                      entry: libraries/net/minecraftforge/forge/1.20.1-47.4.18/unix_args.txt
+                      version: '1.20.1'
+                      loaderVersion: '47.4.18'
+                      missing: []
+        '400':
+          description: JSON 请求体无效、目录路径无效或扫描失败。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+  /api/instances:
+    post:
+      tags: [实例]
+      summary: 添加实例或更新启动配置
+      operationId: saveInstance
+      description: |
+        省略 id 时创建实例，传入已有 id 时更新该实例。仅扫描所填目录本身，
+        entry 必须匹配该目录内的一个候选。可保存缺少依赖的候选，启动时才会拒绝。
+        编辑时请提交希望保留的 name、java 和 prestart，省略这些字段会恢复默认值。
+      parameters:
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveInstanceRequest'
+            examples:
+              create:
+                summary: 添加实例
+                value:
+                  dir: /home/minecraft/mc-servers/example
+                  entry: server.jar
+                  name: 示例服
+                  java: java
+              update:
+                summary: 更新实例
+                value:
+                  id: de305d54-75b4-431b-adb2-eb6b9e546014
+                  dir: /home/minecraft/mc-servers/example
+                  entry: server.jar
+                  name: 示例服
+                  java: /usr/bin/java
+                  prestart: scripts/prepare.sh
+      responses:
+        '200':
+          $ref: '#/components/responses/InstanceSnapshot'
+        '400':
+          description: JSON 请求体或目录无效、扫描失败，或 entry 未匹配候选入口。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '409':
+          description: 正在保存设置、待修改实例正在运行或执行启停操作，或该目录已被其他实例导入。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/settings:
+    post:
+      tags: [面板]
+      summary: 修改面板监听端口
+      operationId: setPanelPort
+      description: |
+        提交当前端口会直接成功。修改成功时先监听并保存新端口，
+        待本次响应发送完成后关闭旧监听，并关闭旧监听上的 WebSocket 终端连接。
+        后续请求应使用新端口。无法绑定新端口时保留旧端口。
+      parameters:
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [port]
+              properties:
+                port:
+                  description: 推荐传整数。实现使用 Number(port) 转换，转换值须为 1 到 65535 的整数，因而也接受可转换的字符串等值。
+                  anyOf:
+                    - $ref: '#/components/schemas/TcpPort'
+                    - type: string
+                  example: 51866
+      responses:
+        '200':
+          description: 当前生效的面板监听端口。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [port]
+                properties:
+                  port:
+                    $ref: '#/components/schemas/TcpPort'
+              example:
+                port: 51866
+        '400':
+          description: JSON 请求体无效，或 port 转换后不是 1 到 65535 的整数。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '409':
+          description: 正在修改端口或保存设置，或监听绑定失败，例如端口已被占用。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: 面板无法监听端口 51866（EADDRINUSE）。
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/instances/{id}/start:
+    post:
+      tags: [实例]
+      summary: 启动实例
+      operationId: startInstance
+      description: 实例未运行时校验启动条件并创建 tmux 会话。实例已经运行时直接返回状态。200 表示本次操作已返回，游戏仍可能正在初始化，或在启动后退出。
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        $ref: '#/components/requestBodies/IgnoredActionBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/InstanceSnapshot'
+        '400':
+          description: 实例目录扫描失败，或 server.properties 中的游戏端口无效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '409':
+          description: 另一个实例正在执行启停操作、面板正在保存设置，或启动入口、依赖、Java、前置脚本、EULA、游戏端口校验失败。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/instances/{id}/stop:
+    post:
+      tags: [实例]
+      summary: 停止实例
+      operationId: stopInstance
+      description: 对运行中的实例发送 stop 并等待游戏进程退出，最多等待约 90 秒。实例未运行时直接返回当前状态。
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        $ref: '#/components/requestBodies/IgnoredActionBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/InstanceSnapshot'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '409':
+          description: 另一个实例正在执行启停操作、面板正在保存设置，或已发送 stop 但游戏进程未在等待时间内退出。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/instances/{id}/restart:
+    post:
+      tags: [实例]
+      summary: 重启实例
+      operationId: restartInstance
+      description: 依次执行停止和启动。停止失败时不会继续启动；启动条件不满足时，实例可能已经停止。200 返回操作完成时的状态，游戏仍可能正在初始化。
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        $ref: '#/components/requestBodies/IgnoredActionBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/InstanceSnapshot'
+        '400':
+          description: 实例目录扫描失败，或 server.properties 中的游戏端口无效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '409':
+          description: 另一个实例正在执行启停操作、面板正在保存设置、游戏进程未及时退出，或启动入口、依赖、Java、前置脚本、EULA、游戏端口校验失败。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/instances/{id}/console:
+    get:
+      tags: [实例]
+      summary: 读取游戏控制台快照
+      operationId: getInstanceConsole
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: 当前捕获的控制台文本及完整实例状态。没有 tmux 窗格时仍成功返回，output 为空字符串。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleSnapshot'
+        '403':
+          $ref: '#/components/responses/ReadForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/instances/{id}/command:
+    post:
+      tags: [实例]
+      summary: 发送 Minecraft 控制台命令
+      operationId: sendGameCommand
+      description: 命令发送至实例的 tmux 窗格并提交回车。成功仅表示已发送，执行结果请读取游戏控制台。
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+        - $ref: '#/components/parameters/PanelHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  maxLength: 2000
+                  pattern: '^(?![\s\S]*[\x00-\x1F\x7F])[\s\S]*\S[\s\S]*$'
+                  description: 非空单行命令。服务器以 UTF-16 代码单元计长，禁止 ASCII 控制字符，发送前去除首尾空白和一个前导斜杠。
+                  example: list
+      responses:
+        '200':
+          description: 命令已发送。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent]
+                properties:
+                  sent:
+                    type: boolean
+                    enum: [true]
+              example:
+                sent: true
+        '400':
+          description: JSON 请求体无效，或命令为空、多行、超长或含有禁止的控制字符。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/WriteForbidden'
+        '404':
+          $ref: '#/components/responses/InstanceNotFound'
+        '409':
+          description: 实例正在执行启停操作，或游戏实例未运行。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    PanelHeader:
+      name: X-MC-Panel
+      in: header
+      required: true
+      description: 面板请求来源校验要求。值必须是字符串 1。
+      schema:
+        type: string
+        enum: ['1']
+        default: '1'
+      example: '1'
+    InstanceId:
+      name: id
+      in: path
+      required: true
+      description: 保存实例时返回的实例 ID。
+      schema:
+        type: string
+        format: uuid
+      example: de305d54-75b4-431b-adb2-eb6b9e546014
+  requestBodies:
+    IgnoredActionBody:
+      required: false
+      description: 后端不读取请求体。前端发送空 JSON 对象 {}，调用方也可以省略请求体。
+      content:
+        application/json:
+          schema:
+            type: object
+          example: {}
+  responses:
+    InstanceSnapshot:
+      description: 操作完成时的实例状态快照。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Instance'
+    ReadForbidden:
+      description: Host 或 Origin 未获允许。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 访问地址或来源未获允许。
+    WriteForbidden:
+      description: Host 或 Origin 未获允许，或者 X-MC-Panel 缺失或值不为 1。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            origin:
+              value:
+                error: 访问地址或来源未获允许。
+            panelHeader:
+              value:
+                error: 请求来源校验失败。
+    InstanceNotFound:
+      description: 指定实例不存在。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 实例不存在。
+    BodyTooLarge:
+      description: 被读取的请求体超过 64 KiB（65536 字节）。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 请求过大。
+    InternalError:
+      description: 后端执行失败，例如 tmux 操作或配置持久化出错。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 面板执行失败，请查看服务日志。
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: 具体错误消息。
+    TcpPort:
+      type: integer
+      minimum: 1
+      maximum: 65535
+    InstanceKind:
+      type: string
+      enum: [jar, fabric, forge, neoforge]
+      description: 探测到的服务端类型，jar 表示通用 Java 服务端。
+    InstanceStatus:
+      type: string
+      enum: [starting, stopping, restarting, running, failed, stopped]
+      description: running 表示 tmux 窗格中的进程仍活跃，不能用于判断游戏是否已就绪。
+    Instance:
+      type: object
+      required: [id, dir, name, entry, kind, version, loaderVersion, java, prestart, status, exit]
+      properties:
+        id:
+          type: string
+          format: uuid
+        dir:
+          type: string
+          description: 实例在服务器上的真实绝对路径。
+        name:
+          type: string
+        entry:
+          type: string
+          description: 保存的候选启动入口。
+        kind:
+          $ref: '#/components/schemas/InstanceKind'
+        version:
+          type: string
+          description: 识别到的 Minecraft 版本。未知时为空字符串。
+        loaderVersion:
+          type: string
+          description: 识别到的加载器版本。未知时为空字符串。
+        java:
+          type: string
+          description: 保存的 Java 可执行文件。java 表示从 PATH 查找。
+        prestart:
+          type: string
+          description: 保存的开服前脚本路径。未配置时为空字符串。
+        status:
+          $ref: '#/components/schemas/InstanceStatus'
+        exit:
+          type: integer
+          nullable: true
+          description: 可读取时为 tmux 窗格的进程退出码，否则为 null。
+      example:
+        id: de305d54-75b4-431b-adb2-eb6b9e546014
+        dir: /home/minecraft/mc-servers/example
+        name: 示例服
+        entry: server.jar
+        kind: jar
+        version: '1.20.1'
+        loaderVersion: ''
+        java: java
+        prestart: ''
+        status: stopped
+        exit: null
+    PanelState:
+      type: object
+      required: [port, bind, home, instances]
+      properties:
+        port:
+          $ref: '#/components/schemas/TcpPort'
+        bind:
+          type: string
+          description: 面板监听地址。
+          example: 127.0.0.1
+        home:
+          type: string
+          description: 目录浏览的起点。进程用户家目录下的 mc-servers 可访问时返回该路径，否则返回家目录。
+          example: /home/minecraft/mc-servers
+        instances:
+          type: array
+          items:
+            $ref: '#/components/schemas/Instance'
+    DirectoryListing:
+      type: object
+      required: [dir, parent, directories]
+      properties:
+        dir:
+          type: string
+          description: 解析符号链接后的当前绝对路径。
+        parent:
+          type: string
+          description: 当前路径的父目录，根目录的 parent 仍为根目录。
+        directories:
+          type: array
+          description: 非隐藏的直接子目录和符号链接，按名称排序。符号链接可能指向普通文件。
+          items:
+            type: object
+            required: [name, dir]
+            properties:
+              name:
+                type: string
+              dir:
+                type: string
+                description: 条目的绝对路径。
+      example:
+        dir: /home/minecraft/mc-servers
+        parent: /home/minecraft
+        directories:
+          - name: example
+            dir: /home/minecraft/mc-servers/example
+    DiscoveryProfile:
+      type: object
+      required: [dir, name, java, port, address, eula, candidates]
+      properties:
+        dir:
+          type: string
+          description: 解析后的服务端绝对目录路径。
+        name:
+          type: string
+          description: 目录名，用作实例的默认显示名。
+        java:
+          type: string
+          description: 探测到的 Java 路径，或 java。
+        port:
+          type: string
+          description: server.properties 中的 server-port；缺省为字符串 25565。扫描阶段不校验端口值。
+          example: '25565'
+        address:
+          type: string
+          description: server.properties 中的 server-ip，缺省为空字符串。
+        eula:
+          type: boolean
+          description: eula.txt 中的 eula 值是否为 true。
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/LaunchCandidate'
+    LaunchCandidate:
+      type: object
+      required: [kind, entry, missing]
+      properties:
+        kind:
+          $ref: '#/components/schemas/InstanceKind'
+        entry:
+          type: string
+          description: 扫描返回的 JAR 或 Linux 参数文件入口标识。保存时原样传回。
+        missing:
+          type: array
+          description: 缺少的必要文件路径或名称，全部存在时为空数组。
+          items:
+            type: string
+        version:
+          type: string
+          nullable: true
+          description: 可选的 Minecraft 版本。探测结果可能省略此字段，JAR 的版本元数据也可能给出 null。
+        loaderVersion:
+          type: string
+          description: 可选的加载器版本。无法识别时省略。
+    SaveInstanceRequest:
+      type: object
+      required: [dir, entry]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 省略时新增。更新时传已有实例 ID，并先停止该实例。
+        dir:
+          type: string
+          description: 面板所在服务器上的绝对目录路径。
+        entry:
+          type: string
+          description: 扫描返回的候选入口标识。
+        name:
+          type: string
+          description: 自定义名称。去除首尾空白后截取前 80 个 UTF-16 代码单元。缺省或空白时取目录名。
+        java:
+          type: string
+          description: Java 可执行文件。缺省或空白时使用扫描结果。支持 java、绝对路径或相对于实例目录的路径。
+        prestart:
+          type: string
+          description: 可选的 Bash 前置脚本路径，支持绝对路径或相对于实例目录的路径。缺省时不执行前置脚本。
+    ConsoleSnapshot:
+      type: object
+      required: [output, status]
+      properties:
+        output:
+          type: string
+          description: 从 tmux 最近 1500 行回滚位置起捕获的窗格文本，含当前可见内容。
+        status:
+          $ref: '#/components/schemas/Instance'
