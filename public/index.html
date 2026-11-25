@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft 服务端面板</title>
+  <link rel="stylesheet" href="/vendor/xterm.css">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/vendor/xterm.js" defer></script>
+  <script src="/vendor/fit.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#instances"><span class="brand-mark" aria-hidden="true">▦</span><span>Minecraft<br><small>服务端面板</small></span></a>
+    <nav aria-label="主导航">
+      <a href="#instances" data-view="instances"><span aria-hidden="true">▤</span>服务端</a>
+      <a href="#terminal" data-view="terminal"><span aria-hidden="true">›_</span>Linux 终端</a>
+      <a href="#settings" data-view="settings"><span aria-hidden="true">⚙</span>设置</a>
+    </nav>
+  </aside>
+  <main>
+    <section id="instances-view">
+      <header class="top"><div><h1>服务端</h1><p id="instance-count"></p></div><button id="add" class="primary">＋ 添加实例</button></header>
+      <div id="instances" class="cards"></div>
+      <section id="instance-detail" class="panel" hidden>
+        <header class="top compact"><div><h2 id="detail-name"></h2><p id="detail-path"></p></div><button id="edit">启动配置</button></header>
+        <div class="console-title"><h3>游戏控制台</h3><span id="console-status" class="status"></span></div>
+        <pre id="console-output" tabindex="0" aria-label="游戏控制台输出"></pre>
+        <form id="command-form" class="row command"><input id="command" placeholder="输入 Minecraft 命令，例如 list" aria-label="Minecraft 命令" required><button class="primary" id="send-command">发送</button></form>
+      </section>
+    </section>
+    <section id="terminal-view" hidden>
+      <header class="top"><div><h1>Linux 终端</h1><p id="terminal-status" aria-live="polite">尚未连接</p></div><button id="connect-terminal" class="primary">连接终端</button></header>
+      <div id="terminal" aria-label="Linux 交互式终端"></div>
+    </section>
+    <section id="settings-view" hidden>
+      <header class="top"><div><h1>设置</h1><p>修改面板的监听端口。</p></div></header>
+      <form id="settings-form" class="panel form-panel">
+        <label>监听地址 <output id="bind-address"></output></label>
+        <label for="port">监听端口</label>
+        <div class="row"><input id="port" type="number" min="1" max="65535" required><button class="primary">保存端口</button></div>
+        <p id="settings-note">保存后，原地址会断开。使用新的端口重新打开面板。</p>
+      </form>
+    </section>
+    <p id="notice" class="notice" role="status" hidden></p>
+  </main>
+  <dialog id="import-dialog">
+    <div class="dialog-inner">
+      <header class="top compact"><h2 id="import-title">添加实例</h2><button id="close-import" aria-label="关闭">×</button></header>
+      <label for="import-path">服务器目录</label>
+      <div class="row"><input id="import-path" placeholder="/home/minecraft/servers/example"><button id="browse">浏览</button><button id="scan" class="primary">扫描</button></div>
+      <div id="browser" class="directory-browser" hidden>
+        <div class="row"><button id="up-directory">上一级</button><span id="current-directory"></span><button id="take-directory">选择此目录</button></div>
+        <div id="directories"></div>
+      </div>
+      <p id="scan-message" aria-live="polite"></p>
+      <form id="import-form" hidden>
+        <label for="entry">服务端启动入口</label><select id="entry" required></select>
+        <div id="entry-note"></div>
+        <label for="name">实例名称</label><input id="name" required maxlength="80">
+        <label for="java">Java 可执行文件</label><input id="java" required>
+        <label for="prestart">开服前脚本（可选）</label><input id="prestart" placeholder="例如 scripts/prepare.sh">
+        <button class="primary save-instance">保存实例</button>
+      </form>
+    </div>
+  </dialog>
+</body>
+</html>
